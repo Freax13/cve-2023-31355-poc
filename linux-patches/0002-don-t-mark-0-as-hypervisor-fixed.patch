@@ -1,0 +1,30 @@
+From 859b878c909863cc1fa5a57d0dc75d43e9ec9e69 Mon Sep 17 00:00:00 2001
+From: Tom Dohrmann <erbse.13@gmx.de>
+Date: Fri, 8 Dec 2023 12:55:10 +0000
+Subject: [PATCH 2/7] don't mark `0` as hypervisor fixed
+
+We want to use this memory for the guest context pages.
+AFAICT there's no real reason Linux marks this address, other than as a
+precaution against null-pointer derefs.
+---
+ drivers/crypto/ccp/sev-dev.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/crypto/ccp/sev-dev.c b/drivers/crypto/ccp/sev-dev.c
+index 21a3064f30c9..cf534a5950e8 100644
+--- a/drivers/crypto/ccp/sev-dev.c
++++ b/drivers/crypto/ccp/sev-dev.c
+@@ -1449,6 +1449,10 @@ static int __sev_snp_init_locked(int *error)
+ 			return rc;
+ 		}
+ 
++		// Usually the first entry has base=0. Since we want to use address 0,
++		// we set the base in first entry to something else.
++		snp_range_list->ranges[0].base = 0x1000;
++
+ 		memset(&data, 0, sizeof(data));
+ 		data.init_rmp = 1;
+ 		data.list_paddr_en = 1;
+-- 
+2.34.1
+

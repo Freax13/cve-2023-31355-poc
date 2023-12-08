@@ -1,0 +1,106 @@
+From 4af2fee5fcb76dcf60b672fc4e17fb1635d3c570 Mon Sep 17 00:00:00 2001
+From: Tom Dohrmann <erbse.13@gmx.de>
+Date: Fri, 8 Dec 2023 13:33:33 +0000
+Subject: [PATCH 7/7] add ioctl for decrypting pfns
+
+Obviously accepting raw pfns from userspace is risky, but it's also
+convenient.
+---
+ arch/x86/kvm/svm/sev.c   | 49 ++++++++++++++++++++++++++++++++++++++++
+ include/uapi/linux/kvm.h |  6 +++++
+ 2 files changed, 55 insertions(+)
+
+diff --git a/arch/x86/kvm/svm/sev.c b/arch/x86/kvm/svm/sev.c
+index a0950eedb7bf..915f47d891cd 100644
+--- a/arch/x86/kvm/svm/sev.c
++++ b/arch/x86/kvm/svm/sev.c
+@@ -2427,6 +2427,52 @@ static int snp_set_instance_certs(struct kvm *kvm, struct kvm_sev_cmd *argp)
+ 	return ret;
+ }
+ 
++static int snp_dbg_decrypt(struct kvm *kvm, struct kvm_sev_cmd *argp)
++{
++	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
++	struct kvm_sev_snp_dbg params;
++	kvm_pfn_t src_pfn;
++	struct page *tmp_page;
++	u64 dst_pfn;
++	u64 gctx_pfn;
++	int ret;
++
++	if (!sev_snp_guest(kvm))
++		return -ENOTTY;
++
++	if (!sev->snp_context)
++		return -EINVAL;
++
++	if (copy_from_user(&params, (void __user *)(uintptr_t)argp->data,
++			   sizeof(params)))
++		return -EFAULT;
++
++	src_pfn = params.src_gfn;
++	// Transition the page into GUEST_INVALID state, so that the firmware will let us decrypt it.
++	rmp_make_private(src_pfn, 0, PG_LEVEL_4K, sev_get_asid(kvm), true);
++
++	tmp_page = alloc_page(GFP_KERNEL_ACCOUNT);
++	if (!tmp_page)
++		return -ENOMEM;
++	dst_pfn = page_to_pfn(tmp_page);
++
++	gctx_pfn = __pa(sev->snp_context) >> PAGE_SHIFT;
++	ret = snp_guest_dbg_decrypt_page(gctx_pfn, src_pfn, dst_pfn, &argp->error);
++	if (ret)
++		goto free_tmp_page;
++
++	if (copy_to_user((void __user *)(uintptr_t)params.dst_uaddr, page_address(tmp_page), PAGE_SIZE))
++		ret = -EFAULT;
++
++free_tmp_page:
++	// Transition the page back into the HYPERVISOR state.
++	rmp_make_shared(src_pfn, PG_LEVEL_4K);
++
++	__free_page(tmp_page);
++
++	return ret;
++}
++
+ int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
+ {
+ 	struct kvm_sev_cmd sev_cmd;
+@@ -2532,6 +2578,9 @@ int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
+ 	case KVM_SEV_SNP_SET_CERTS:
+ 		r = snp_set_instance_certs(kvm, &sev_cmd);
+ 		break;
++	case KVM_SEV_SNP_DBG_DECRYPT:
++		r = snp_dbg_decrypt(kvm, &sev_cmd);
++		break;
+ 	default:
+ 		r = -EINVAL;
+ 		goto out;
+diff --git a/include/uapi/linux/kvm.h b/include/uapi/linux/kvm.h
+index 0444e122ac5e..51ba8a047e46 100644
+--- a/include/uapi/linux/kvm.h
++++ b/include/uapi/linux/kvm.h
+@@ -1975,6 +1975,7 @@ enum sev_cmd_id {
+ 	KVM_SEV_SNP_LAUNCH_FINISH,
+ 	KVM_SEV_SNP_GET_CERTS,
+ 	KVM_SEV_SNP_SET_CERTS,
++	KVM_SEV_SNP_DBG_DECRYPT,
+ 
+ 	KVM_SEV_NR_MAX,
+ };
+@@ -2122,6 +2123,11 @@ struct kvm_sev_snp_launch_finish {
+ 	__u8 pad[6];
+ };
+ 
++struct kvm_sev_snp_dbg {
++	__u64 src_gfn;
++	__u64 dst_uaddr;
++};
++
+ struct kvm_sev_snp_get_certs {
+ 	__u64 certs_uaddr;
+ 	__u64 certs_len;
+-- 
+2.34.1
+

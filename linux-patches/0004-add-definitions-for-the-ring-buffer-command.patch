@@ -1,0 +1,58 @@
+From 9c1f029350b7e1679e14b5e07321fbc29a8feae8 Mon Sep 17 00:00:00 2001
+From: Tom Dohrmann <erbse.13@gmx.de>
+Date: Fri, 8 Dec 2023 12:59:16 +0000
+Subject: [PATCH 4/7] add definitions for the ring buffer command
+
+We'll use those as part of the exploit.
+---
+ drivers/crypto/ccp/sev-dev.c |  1 +
+ include/linux/psp-sev.h      | 14 ++++++++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/drivers/crypto/ccp/sev-dev.c b/drivers/crypto/ccp/sev-dev.c
+index cf534a5950e8..b6eb83bd34ba 100644
+--- a/drivers/crypto/ccp/sev-dev.c
++++ b/drivers/crypto/ccp/sev-dev.c
+@@ -201,6 +201,7 @@ static int sev_cmd_buffer_len(int cmd)
+ 	case SEV_CMD_LAUNCH_UPDATE_SECRET:	return sizeof(struct sev_data_launch_secret);
+ 	case SEV_CMD_DOWNLOAD_FIRMWARE:		return sizeof(struct sev_data_download_firmware);
+ 	case SEV_CMD_GET_ID:			return sizeof(struct sev_data_get_id);
++	case SEV_CMD_RING_BUFFER:			return sizeof(struct sev_data_ring_buffer);
+ 	case SEV_CMD_ATTESTATION_REPORT:	return sizeof(struct sev_data_attestation_report);
+ 	case SEV_CMD_SEND_CANCEL:		return sizeof(struct sev_data_send_cancel);
+ 	case SEV_CMD_SNP_GCTX_CREATE:		return sizeof(struct sev_data_snp_addr);
+diff --git a/include/linux/psp-sev.h b/include/linux/psp-sev.h
+index eb2c8a2b2a02..7f524af9250a 100644
+--- a/include/linux/psp-sev.h
++++ b/include/linux/psp-sev.h
+@@ -56,6 +56,7 @@ enum sev_cmd {
+ 	SEV_CMD_DOWNLOAD_FIRMWARE	= 0x00B,
+ 	SEV_CMD_GET_ID			= 0x00C,
+ 	SEV_CMD_INIT_EX                 = 0x00D,
++	SEV_CMD_RING_BUFFER			= 0x00F,
+ 
+ 	/* Guest commands */
+ 	SEV_CMD_DECOMMISSION		= 0x020,
+@@ -206,6 +207,19 @@ struct sev_data_get_id {
+ 	u64 address;				/* In */
+ 	u32 len;				/* In/Out */
+ } __packed;
++
++struct sev_data_ring_buffer {
++	u64 QLoCmdPtr; /* In */
++	u64 QLoStatVal; /* In */
++	u64 QHiCmdPtr; /* In */
++	u64 QHiStatVal; /* In */
++	u8 QLoSize; /* In */
++	u8 QHiSize; /* In */
++	u16 QLoThreshold; /* In */
++	u16 QHiThreshold; /* In */
++	u16 IntOnEmpty; /* In */
++} __packed;
++
+ /**
+  * struct sev_data_pdh_cert_export - PDH_CERT_EXPORT command parameters
+  *
+-- 
+2.34.1
+

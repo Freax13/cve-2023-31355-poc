@@ -1,0 +1,36 @@
+From a84802dde6e164c629964cbb47cd497ba5757039 Mon Sep 17 00:00:00 2001
+From: Tom Dohrmann <erbse.13@gmx.de>
+Date: Fri, 8 Dec 2023 12:57:37 +0000
+Subject: [PATCH 3/7] always use address `0` for guest context pages
+
+This places the guest context page at the location that we will later
+corrupt.
+---
+ arch/x86/kvm/svm/sev.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/arch/x86/kvm/svm/sev.c b/arch/x86/kvm/svm/sev.c
+index d71ec257debb..230296549c91 100644
+--- a/arch/x86/kvm/svm/sev.c
++++ b/arch/x86/kvm/svm/sev.c
+@@ -1978,14 +1978,15 @@ static void *snp_context_create(struct kvm *kvm, struct kvm_sev_cmd *argp)
+ 	int rc;
+ 
+ 	/* Allocate memory for context page */
+-	context = snp_alloc_firmware_page(GFP_KERNEL_ACCOUNT);
++	context = phys_to_virt(0);
+ 	if (!context)
+ 		return NULL;
+ 
++	rmp_make_private(0, 0, PG_LEVEL_4K, 0, true);
++	
+ 	data.gctx_paddr = __psp_pa(context);
+ 	rc = __sev_issue_cmd(argp->sev_fd, SEV_CMD_SNP_GCTX_CREATE, &data, &argp->error);
+ 	if (rc) {
+-		snp_free_firmware_page(context);
+ 		return NULL;
+ 	}
+ 
+-- 
+2.34.1
+

